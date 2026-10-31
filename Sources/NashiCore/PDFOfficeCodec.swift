@@ -82,7 +82,8 @@ enum PDFOfficeCodec {
     static func recognizedCells(_ page: PDFPage, token: CancellationToken) throws -> [TextCell] {
         try token.check()
         let bounds = page.bounds(for: .cropBox)
-        let size = NSSize(width: max(1, bounds.width * 2), height: max(1, bounds.height * 2))
+        let pixels = try rasterSize(bounds.size, scale: 2)
+        let size = NSSize(width: max(1, pixels.width), height: max(1, pixels.height))
         let image = page.thumbnail(of: size, for: .cropBox)
         var rect = CGRect(origin: .zero, size: size)
         guard let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: nil) else { return [] }
@@ -117,7 +118,8 @@ enum PDFOfficeCodec {
             guard bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else {
                 throw NashiError.invalidInput("PDF page \(index + 1) has an invalid size.")
             }
-            let size = NSSize(width: max(1, bounds.width * 2), height: max(1, bounds.height * 2))
+            let pixels = try rasterSize(bounds.size, scale: 2)
+            let size = NSSize(width: max(1, pixels.width), height: max(1, pixels.height))
             let image = page.thumbnail(of: size, for: .cropBox)
             var rect = CGRect(origin: .zero, size: size)
             guard let cg = image.cgImage(forProposedRect: &rect, context: nil, hints: nil), let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else {

@@ -132,7 +132,8 @@ public enum PDFEngine {
                         // The thumbnail is drawn upright, so size it and the new page by the displayed
                         // (rotated) size, and give the image that size in points rather than pixels.
                         let shown=abs(page.rotation)%180==90 ? CGSize(width:bounds.height,height:bounds.width):bounds.size
-                        let thumb=page.thumbnail(of:NSSize(width:shown.width*dpi/72,height:shown.height*dpi/72),for:.cropBox)
+                        let pixels=try PDFOfficeCodec.rasterSize(shown,scale:CGFloat(dpi/72))
+                        let thumb=page.thumbnail(of:NSSize(width:pixels.width,height:pixels.height),for:.cropBox)
                         guard let cg=thumb.cgImage(forProposedRect:nil,context:nil,hints:nil) else { continue }
                         let bitmap=NSBitmapImageRep(cgImage:cg)
                         guard let data=bitmap.representation(using:.jpeg,properties:[.compressionFactor:quality]),let img=NSImage(data:data) else { continue }
