@@ -142,6 +142,15 @@ public sealed partial class OfficeDocuments(string office,string deno,string ass
     }
     public static string SanitizedHtml(string html)
     {
+        // A removal can join the text around it into a new attribute or tag
+        // ("sr src=x c=..."), so repeat until nothing changes. Every pass that
+        // changes the text shortens it, so the loop ends.
+        string previous;
+        do { previous=html; html=SanitizePass(html); } while(html!=previous);
+        return html;
+    }
+    private static string SanitizePass(string html)
+    {
         html=Regex.Replace(html,@"<(script|iframe|object|embed)\b[^>]*>[\s\S]*?</\1\s*>","",RegexOptions.IgnoreCase,TimeSpan.FromSeconds(2));
         html=Regex.Replace(html,@"<link\b[^>]*>|<base\b[^>]*>|</?(?:object|embed|applet|frame|frameset|iframe)\b[^>]*>","",RegexOptions.IgnoreCase,TimeSpan.FromSeconds(2));
         // Resource attributes keep only embedded data; quoted and unquoted values are both removed.
