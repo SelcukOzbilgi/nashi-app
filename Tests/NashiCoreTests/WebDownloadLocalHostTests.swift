@@ -21,3 +21,18 @@ final class WebDownloadLocalHostTests: XCTestCase {
         }
     }
 }
+
+final class WebDownloadRedirectGuardTests: XCTestCase {
+    func testProbeRedirectsToLocalTargetsAreRefused() throws {
+        let guardian = WebDownloadEngine.RedirectGuard()
+        let session = URLSession(configuration: .ephemeral)
+        defer { session.invalidateAndCancel() }
+        let task = session.dataTask(with: URL(string: "https://example.com/a")!)
+        let response = try XCTUnwrap(HTTPURLResponse(url: URL(string: "https://example.com/a")!, statusCode: 302, httpVersion: nil, headerFields: nil))
+        for (target, allowed) in [("http://127.0.0.1/admin", false), ("http://printer.local/", false), ("https://cdn.example.com/a.mp4", true)] {
+            var followed: URLRequest??
+            guardian.urlSession(session, task: task, willPerformHTTPRedirection: response, newRequest: URLRequest(url: URL(string: target)!)) { followed = $0 }
+            XCTAssertEqual(followed??.url?.absoluteString, allowed ? target : nil, target)
+        }
+    }
+}

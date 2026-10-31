@@ -51,7 +51,8 @@ public enum WebDownloadEngine {
     }
     public static func inspect(_ url:URL,token:CancellationToken = .init()) async throws -> WebMediaInfo {
         let url=try link(url.absoluteString);try token.check()
-        let session=URLSession(configuration:.ephemeral)
+        // The HEAD and thumbnail probes follow redirects only to links link() accepts.
+        let session=URLSession(configuration:.ephemeral,delegate:RedirectGuard(),delegateQueue:nil)
         defer { session.invalidateAndCancel() }
         if WebMediaDragPayload.isInstagramPhotoPost(url) {
             let args=try baseArguments(photoPost:true)+["--ignore-no-formats-error","--skip-download","--dump-single-json","--no-progress","--",url.absoluteString]
@@ -266,6 +267,11 @@ public enum WebDownloadEngine {
         return String(selected.joined(separator:"\n").prefix(1_500))
     }
 
+    final class RedirectGuard:NSObject,URLSessionTaskDelegate,@unchecked Sendable {
+        func urlSession(_ session:URLSession,task:URLSessionTask,willPerformHTTPRedirection response:HTTPURLResponse,newRequest request:URLRequest,completionHandler:@escaping(URLRequest?)->Void) {
+            completionHandler(request.url.flatMap{try? WebDownloadEngine.link($0.absoluteString)} == nil ? nil:request)
+        }
+    }
     private final class TransferDelegate:NSObject,URLSessionDownloadDelegate,@unchecked Sendable {
         let token:CancellationToken,progress:ProgressHandler
         init(token:CancellationToken,progress:@escaping ProgressHandler) { self.token=token;self.progress=progress }
