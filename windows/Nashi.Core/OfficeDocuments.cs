@@ -144,7 +144,11 @@ public sealed partial class OfficeDocuments(string office,string deno,string ass
     {
         html=Regex.Replace(html,@"<(script|iframe|object|embed)\b[^>]*>[\s\S]*?</\1\s*>","",RegexOptions.IgnoreCase,TimeSpan.FromSeconds(2));
         html=Regex.Replace(html,@"<link\b[^>]*>|<base\b[^>]*>","",RegexOptions.IgnoreCase,TimeSpan.FromSeconds(2));
-        html=Regex.Replace(html,"\\s(?:src|background)\\s*=\\s*([\"'])(?!data:)[^\"']*\\1","",RegexOptions.IgnoreCase,TimeSpan.FromSeconds(2));
+        // Resource attributes keep only embedded data; quoted and unquoted values are both removed.
+        html=Regex.Replace(html,@"\s(?:src|srcset|background|poster|xlink:href)\s*=\s*(?:([""'])(?!data:)[\s\S]*?\1|(?![""'])(?!data:)[^\s>]+)","",RegexOptions.IgnoreCase,TimeSpan.FromSeconds(2));
+        // UNC (\\host, //host) and file: references are dropped from every other attribute too.
+        html=Regex.Replace(html,@"\s[\w:.-]+\s*=\s*(?:([""'])\s*(?:\\\\|//|file:)[\s\S]*?\1|(?:\\\\|//|file:)[^\s>]*)","",RegexOptions.IgnoreCase,TimeSpan.FromSeconds(2));
+        html=Regex.Replace(html,@"@import\s[^;<]*;?","",RegexOptions.IgnoreCase,TimeSpan.FromSeconds(2));
         return Regex.Replace(html,@"url\s*\([^)]*\)","none",RegexOptions.IgnoreCase,TimeSpan.FromSeconds(2));
     }
 }
