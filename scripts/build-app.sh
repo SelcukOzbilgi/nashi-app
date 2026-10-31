@@ -50,6 +50,8 @@ done
 fi
 if [[ -f Tools/ExifTool/exiftool ]]; then
   ditto Tools/ExifTool "$application/Contents/Resources/Tools/ExifTool"
+  # ExifTool's own test suite (sample binaries, ~4 MB) is not needed at run time.
+  rm -rf "$application/Contents/Resources/Tools/ExifTool/t"
 else
   print -u2 "Missing Tools/ExifTool; run scripts/setup-exiftool.sh"
   exit 1
