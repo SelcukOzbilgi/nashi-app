@@ -2105,6 +2105,7 @@
 "TOOLS · WHILE DRAGGING" = "OUTILS · PENDANT LE GLISSEMENT";
 "TOP" = "HAUT";
 "TRACK NAME" = "NOM DE LA PISTE";
+"TRACKPAD HAPTICS" = "RETOUR HAPTIQUE DU TRACKPAD";
 "TRANSPARENT" = "TRANSPARENT";
 "TRANSPARENT BACKGROUNDS SAVE AS PNG TO KEEP THEIR TRANSPARENCY." = "LES ARRIÈRE-PLANS TRANSPARENTS SONT ENREGISTRÉS EN PNG POUR CONSERVER LEUR TRANSPARENCE.";
 "TRIM" = "ÉLAGUER";
@@ -2197,6 +2198,7 @@
 "Tools · while dragging" = "Outils · pendant le glissement";
 "Top" = "Haut";
 "Track name" = "Nom de la piste";
+"Trackpad haptics" = "Retour haptique du trackpad";
 "Transparent" = "Transparent";
 "Transparent backgrounds save as PNG to keep their transparency." = "Les arrière-plans transparents sont enregistrés en PNG pour conserver leur transparence.";
 "Trim" = "Élaguer";

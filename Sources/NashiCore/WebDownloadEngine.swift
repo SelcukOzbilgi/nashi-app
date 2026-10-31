@@ -30,11 +30,29 @@ public enum WebDownloadEngine {
               let host=url.host,!host.isEmpty,url.user==nil,url.password==nil else {
             throw NashiError.invalidInput("Paste one complete http:// or https:// media link.")
         }
+        guard !isLocalHost(host) else { throw NashiError.invalidInput("Paste a public http:// or https:// media link.") }
         return url
+    }
+    /// Same rule as Windows WebDownload.Validate (loopback or a .local name), for
+    /// the pasted link and every redirect. Numeric IPv4 spellings that resolve
+    /// to 127/8 or 0.0.0.0 and IPv4-mapped IPv6 loopback count as loopback too.
+    static func isLocalHost(_ host:String)->Bool {
+        var name=host.lowercased()
+        if name.hasPrefix("["),name.hasSuffix("]") { name=String(name.dropFirst().dropLast()) }
+        while name.hasSuffix(".") { name.removeLast() }
+        if name.isEmpty || name=="localhost" || name.hasSuffix(".localhost") || name=="local" || name.hasSuffix(".local") { return true }
+        var v4=in_addr()
+        if inet_aton(name,&v4) != 0 { let first=UInt32(bigEndian:v4.s_addr)>>24;return first==127 || first==0 }
+        var v6=in6_addr()
+        guard inet_pton(AF_INET6,name,&v6)==1 else { return false }
+        let bytes=withUnsafeBytes(of:&v6){ Array($0) }
+        if bytes[0..<15].allSatisfy({ $0==0 }) && bytes[15]<=1 { return true }
+        return bytes[0..<10].allSatisfy({ $0==0 }) && bytes[10]==0xff && bytes[11]==0xff && (bytes[12]==127 || bytes[12]==0)
     }
     public static func inspect(_ url:URL,token:CancellationToken = .init()) async throws -> WebMediaInfo {
         let url=try link(url.absoluteString);try token.check()
-        let session=URLSession(configuration:.ephemeral)
+        // The HEAD and thumbnail probes follow redirects only to links link() accepts.
+        let session=URLSession(configuration:.ephemeral,delegate:RedirectGuard(),delegateQueue:nil)
         defer { session.invalidateAndCancel() }
         if WebMediaDragPayload.isInstagramPhotoPost(url) {
             let args=try baseArguments(photoPost:true)+["--ignore-no-formats-error","--skip-download","--dump-single-json","--no-progress","--",url.absoluteString]
@@ -249,6 +267,11 @@ public enum WebDownloadEngine {
         return String(selected.joined(separator:"\n").prefix(1_500))
     }
 
+    final class RedirectGuard:NSObject,URLSessionTaskDelegate,@unchecked Sendable {
+        func urlSession(_ session:URLSession,task:URLSessionTask,willPerformHTTPRedirection response:HTTPURLResponse,newRequest request:URLRequest,completionHandler:@escaping(URLRequest?)->Void) {
+            completionHandler(request.url.flatMap{try? WebDownloadEngine.link($0.absoluteString)} == nil ? nil:request)
+        }
+    }
     private final class TransferDelegate:NSObject,URLSessionDownloadDelegate,@unchecked Sendable {
         let token:CancellationToken,progress:ProgressHandler
         init(token:CancellationToken,progress:@escaping ProgressHandler) { self.token=token;self.progress=progress }

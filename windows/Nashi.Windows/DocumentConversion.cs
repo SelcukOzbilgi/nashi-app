@@ -35,6 +35,9 @@ public sealed class DocumentConversion(OfficeRuntime runtime,Toolchain tools)
             {
                 source=Path.Combine(work,format=="xlsx"?"Tables.html":"PDF document.html");var html=options.Layout=="preserve"?await PdfPreservedHtml(input,work,options.Dpi,token,options.Password):format=="xlsx"?PdfTables(input,options.Password):await EditablePdfHtml(input,options,token);await File.WriteAllTextAsync(source,html,token);
             }
+            // Clean HTML before every route (images, Pages, fixed EPUB and Office): LibreOffice
+            // would otherwise load linked http, UNC (\\host) or file: resources while importing it.
+            if(FeatureCatalog.Extension(source)=="html"){var safe=Path.Combine(work,"Safe.html");await File.WriteAllTextAsync(safe,OfficeDocuments.SanitizedHtml(await File.ReadAllTextAsync(source,token)),token);source=safe;}
             if(format is "png" or "jpg")
             {
                 var pdf=ext=="pdf"?input:await Require(engine).OfficeAsync(source,"pdf",work,token);var pages=await NativePdf.RenderAsync(pdf,options.Dpi,token,ext=="pdf"?options.Password:"");
@@ -46,7 +49,6 @@ public sealed class DocumentConversion(OfficeRuntime runtime,Toolchain tools)
             }
             if(format=="epub"&&options.EpubLayout=="fixed")
             {var pdf=await Require(engine).OfficeAsync(source,"pdf",work,token);var output=SafePaths.Unique(tx.StagingDirectory,Path.GetFileNameWithoutExtension(input)+".epub");EpubFixed(await NativePdf.RenderAsync(pdf,options.Dpi,token,ext=="pdf"?options.Password:""),output,Path.GetFileNameWithoutExtension(input));outputs.Add(output);continue;}
-            if(FeatureCatalog.Extension(source)=="html"){var safe=Path.Combine(work,"Safe.html");await File.WriteAllTextAsync(safe,OfficeDocuments.SanitizedHtml(await File.ReadAllTextAsync(source,token)),token);source=safe;}
             var converted=await Require(engine).OfficeAsync(source,format,work,token);var target=SafePaths.Unique(tx.StagingDirectory,Path.GetFileNameWithoutExtension(input)+"."+format);File.Move(converted,target);outputs.Add(target);progress?.Report(new((i+1d)/inputs.Count*.98,"Saving document…"));
         }
         return tx.Publish(outputs,token);

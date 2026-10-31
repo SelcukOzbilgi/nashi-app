@@ -3,8 +3,6 @@ on:
   push:
     branches: [main]
   pull_request:
-  repository_dispatch:
-    types: [owner-pr-merged]
 permissions:
   contents: read
 concurrency:

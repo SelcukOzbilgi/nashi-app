@@ -25,6 +25,14 @@ public enum ExternalToolSetup {
     public static var status:ToolSetupStatus { ToolSetupStatus { try? Dependencies.executable($0) } }
     public static var mediaReady:Bool { status.mediaReady }
     public static var officeReady:Bool { status.officeReady }
+    // (name, URL, SHA-256 of the executable or archive, kind, SHA-256 of a "binary" zip).
+    // A "binary" zip is checked before it is unpacked, then its executable after.
+    static let mediaPackages:[(String,String,String,String?,String?)] = [
+        ("ffmpeg","https://www.osxexperts.net/ffmpeg9arm.zip","591260c945d0eef150e3bf82b0ef988bd36a9cecc18ff05d6679617159f0a95e","binary","d0c06c5c68ce48af3143b262f7a9118a7c9f67de1e237fcc24ffb14df9c67af9"),
+        ("ffprobe","https://www.osxexperts.net/ffprobe9arm.zip","e11c17e8200b3ee4c4c186d245e2b4053f01d56957336c1817fca0b997469106","binary","0c94fbdd8917022f28115eca512196cf4648732bc9e5db9ec8896c7e519d02aa"),
+        ("yt-dlp","https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_macos","0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202",nil,nil),
+        ("deno","https://github.com/denoland/deno/releases/download/v2.9.7/deno-aarch64-apple-darwin.zip","5cd46d6268f6f78f5d88bdc7159d20bd44cdaa4b3303474839f87ec6fe7ae25c","archive",nil)
+    ]
     public static func installMedia(token:CancellationToken,progress:@escaping @Sendable (Double?,String)->Void) async throws {
         try token.check();try Task.checkCancellation()
         if mediaReady { progress(1,"Media tools are ready.");return }
@@ -32,19 +40,14 @@ public enum ExternalToolSetup {
         let stage=root.appendingPathComponent(".media-\(UUID().uuidString)",isDirectory:true)
         try fm.createDirectory(at:stage,withIntermediateDirectories:false)
         defer { try? fm.removeItem(at:stage) }
-        let packages:[(String,String,String,String?)] = [
-            ("ffmpeg","https://www.osxexperts.net/ffmpeg9arm.zip","591260c945d0eef150e3bf82b0ef988bd36a9cecc18ff05d6679617159f0a95e","binary"),
-            ("ffprobe","https://www.osxexperts.net/ffprobe9arm.zip","e11c17e8200b3ee4c4c186d245e2b4053f01d56957336c1817fca0b997469106","binary"),
-            ("yt-dlp","https://github.com/yt-dlp/yt-dlp/releases/download/2026.08.19/yt-dlp_macos","0f192b7ec147ab6288885d6351d9ab67367640029b4377576ef46dd79cf7b202",nil),
-            ("deno","https://github.com/denoland/deno/releases/download/v2.9.7/deno-aarch64-apple-darwin.zip","5cd46d6268f6f78f5d88bdc7159d20bd44cdaa4b3303474839f87ec6fe7ae25c","archive")
-        ]
+        let packages=mediaPackages
         for (index,package) in packages.enumerated() {
             try token.check();try Task.checkCancellation()
             let archive=stage.appendingPathComponent("download-\(index)")
             try await CheckedToolDownload.fetch(URL(string:package.1)!,to:archive,maximum:400*1024*1024) { fraction in
                 progress(fraction.map{(Double(index)+$0)/Double(packages.count)},"Downloading \(package.0)…")
             }
-            if package.3 != "binary" { try verify(archive,digest:package.2) }
+            try verify(archive,digest:package.3 == "binary" ? package.4 ?? "" : package.2)
             let output=stage.appendingPathComponent(package.0)
             if package.3 != nil {
                 let unpack=stage.appendingPathComponent("unpack-\(index)",isDirectory:true)
@@ -83,7 +86,7 @@ public enum ExternalToolSetup {
         try ToolInstallation.publish(content,to:target) { usable($0.appendingPathComponent("LibreOffice.app/Contents/MacOS/soffice")) }
         progress(1,"Office tools are ready.")
     }
-    private static func verify(_ file:URL,digest:String) throws {
+    static func verify(_ file:URL,digest:String) throws {
         let input=try FileHandle(forReadingFrom:file);defer{try? input.close()};var hasher=SHA256()
         while let bytes=try input.read(upToCount:1024*1024),!bytes.isEmpty {hasher.update(data:bytes)}
         let actual=hasher.finalize().map{String(format:"%02x",$0)}.joined()

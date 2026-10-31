@@ -15,11 +15,26 @@ enum PDFOfficeCodec {
         return CGRect(origin: .zero, size: rotated ? CGSize(width: box.height, height: box.width) : box.size)
     }
 
+    /// Largest raster side for a PDF page, as in PDFEngine page rendering.
+    static let maximumRasterSide: CGFloat = 32000
+
+    /// Pixel size of `size` at `scale`, checked before any Int conversion: a
+    /// huge or non-finite page box is reported instead of trapping.
+    static func rasterSize(_ size: CGSize, scale: CGFloat) throws -> CGSize {
+        let width = size.width * scale, height = size.height * scale
+        guard width.isFinite, height.isFinite, width >= 0, height >= 0,
+              width <= maximumRasterSide, height <= maximumRasterSide else {
+            throw NashiError.failed("The PDF page is too large to render at this resolution.")
+        }
+        return CGSize(width: width, height: height)
+    }
+
     static func rasterPNG(_ page: PDFPage, rect crop: CGRect? = nil, dpi: Int = 144, token: CancellationToken) throws -> Data {
         try token.check()
         let bounds = crop ?? visualBounds(page)
         let scale = CGFloat(max(36, min(600, dpi))) / 72
-        let width = max(1, Int(ceil(bounds.width * scale))), height = max(1, Int(ceil(bounds.height * scale)))
+        let pixels = try rasterSize(bounds.size, scale: scale)
+        let width = max(1, Int(ceil(pixels.width))), height = max(1, Int(ceil(pixels.height)))
         guard width <= 32000, height <= 32000, let cgPage = page.pageRef,
               let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
             throw NashiError.failed("The PDF page is too large to render at this resolution.")
@@ -67,7 +82,8 @@ enum PDFOfficeCodec {
     static func recognizedCells(_ page: PDFPage, token: CancellationToken) throws -> [TextCell] {
         try token.check()
         let bounds = page.bounds(for: .cropBox)
-        let size = NSSize(width: max(1, bounds.width * 2), height: max(1, bounds.height * 2))
+        let pixels = try rasterSize(bounds.size, scale: 2)
+        let size = NSSize(width: max(1, pixels.width), height: max(1, pixels.height))
         let image = page.thumbnail(of: size, for: .cropBox)
         var rect = CGRect(origin: .zero, size: size)
         guard let cgImage = image.cgImage(forProposedRect: &rect, context: nil, hints: nil) else { return [] }
@@ -102,7 +118,8 @@ enum PDFOfficeCodec {
             guard bounds.width.isFinite, bounds.height.isFinite, bounds.width > 0, bounds.height > 0 else {
                 throw NashiError.invalidInput("PDF page \(index + 1) has an invalid size.")
             }
-            let size = NSSize(width: max(1, bounds.width * 2), height: max(1, bounds.height * 2))
+            let pixels = try rasterSize(bounds.size, scale: 2)
+            let size = NSSize(width: max(1, pixels.width), height: max(1, pixels.height))
             let image = page.thumbnail(of: size, for: .cropBox)
             var rect = CGRect(origin: .zero, size: size)
             guard let cg = image.cgImage(forProposedRect: &rect, context: nil, hints: nil), let png = NSBitmapImageRep(cgImage: cg).representation(using: .png, properties: [:]) else {

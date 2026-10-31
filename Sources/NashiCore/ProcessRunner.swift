@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 public struct ProcessResult: Sendable {
     public let output: Data
@@ -7,76 +8,144 @@ public struct ProcessResult: Sendable {
 }
 
 public enum ProcessRunner {
+    /// Each tool runs in its own process group, so Cancel, app termination and
+    /// a normal exit also stop the helpers it started (LibreOffice, ffmpeg under
+    /// yt-dlp). Those helpers inherit the output pipes; waiting for the pipes to
+    /// close is bounded. Arguments are argv entries; no shell is involved.
     @discardableResult
     public static func run(_ executable: URL, _ arguments: [String], directory: URL? = nil, token: CancellationToken = .init(), environment: [String: String] = [:], onOutput: (@Sendable (Data) -> Void)? = nil) throws -> ProcessResult {
         try token.check()
-        let process = Process()
-        process.executableURL = executable
         // Conversion inputs stay local even if a media container references an
         // external playlist segment. Local pipes/data/encrypted files still work.
-        process.arguments = ["ffmpeg","ffprobe"].contains(executable.lastPathComponent) && !arguments.contains("-protocol_whitelist") ? ["-protocol_whitelist","file,pipe,crypto,data"]+arguments:arguments
-        process.currentDirectoryURL = directory
-        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
+        let arguments = ["ffmpeg","ffprobe"].contains(executable.lastPathComponent) && !arguments.contains("-protocol_whitelist") ? ["-protocol_whitelist","file,pipe,crypto,data"]+arguments:arguments
+        let variables = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
         let output = Pipe(), errors = Pipe()
-        process.standardOutput = output; process.standardError = errors
+        let pid = try spawn(executable, arguments, directory: directory, environment: variables, output: output, errors: errors)
+        running.insert(pid)
+        defer { running.remove(pid) }
         // Drain both streams concurrently: codec diagnostics can exceed a pipe buffer.
         let group = DispatchGroup()
-        let captured = Capture()
+        let captured = Capture(keepsTail: onOutput != nil)
         group.enter()
         DispatchQueue.global().async {
-            defer { group.leave() }
+            defer { try? output.fileHandleForReading.close(); group.leave() }
             // availableData returns as soon as bytes arrive; read(upToCount:) can
             // wait for a full buffer and leave a short progress stream stuck at 0%.
             while true {
                 let chunk = output.fileHandleForReading.availableData
                 guard !chunk.isEmpty else { break }
-                captured.output.append(chunk)
-                if onOutput != nil && captured.output.count>2_000_000 {
-                    captured.output.removeFirst(captured.output.count-2_000_000)
-                }
+                captured.appendOutput(chunk)
                 onOutput?(chunk)
             }
         }
         group.enter()
-        DispatchQueue.global().async { captured.errors = errors.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-        do { try process.run() } catch {
-            try? output.fileHandleForWriting.close(); try? errors.fileHandleForWriting.close()
-            group.wait()
-            throw error
+        DispatchQueue.global().async {
+            defer { try? errors.fileHandleForReading.close(); group.leave() }
+            while true {
+                let chunk = errors.fileHandleForReading.availableData
+                guard !chunk.isEmpty else { break }
+                captured.appendErrors(chunk)
+            }
         }
-        running.insert(process); defer { running.remove(process) }
-        while process.isRunning {
-            if token.isCancelled {
-                process.terminate()
-                let deadline = Date().addingTimeInterval(2)
-                while process.isRunning && Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
-                if process.isRunning { kill(process.processIdentifier, SIGKILL) }
-                break
+        var status: Int32 = 0, stoppingAt: Date?
+        while true {
+            let waited = waitpid(pid, &status, WNOHANG)
+            if waited == pid { break }
+            if waited < 0 {
+                if errno == EINTR { continue }
+                status = -1; break
+            }
+            if token.isCancelled || running.isStopping(pid) {
+                if stoppingAt == nil { stoppingAt = Date(); kill(-pid, SIGTERM) }
+                else if Date().timeIntervalSince(stoppingAt!) > stopGrace { kill(-pid, SIGKILL) }
             }
             Thread.sleep(forTimeInterval: 0.03)
         }
-        process.waitUntilExit(); group.wait()
-        try token.check()
-        guard process.terminationStatus == 0 else {
-            let diagnostic = String(decoding: captured.errors.suffix(6000), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-            throw NashiError.failed(diagnostic.isEmpty ? "\(executable.lastPathComponent) exited with code \(process.terminationStatus)." : diagnostic)
+        // Helpers left in the group must not outlive the tool or hold its pipes open.
+        kill(-pid, SIGTERM)
+        if group.wait(timeout: .now() + stopGrace) == .timedOut {
+            kill(-pid, SIGKILL)
+            // A helper that left the group can still hold a pipe; stop waiting for it.
+            _ = group.wait(timeout: .now() + stopGrace)
         }
-        return ProcessResult(output: captured.output, errorOutput: captured.errors)
+        try token.check()
+        let result = captured.result
+        let signalled = status & 0x7f != 0
+        let code = status < 0 ? status : signalled ? status & 0x7f : (status >> 8) & 0xff
+        guard status == 0 else {
+            let diagnostic = String(decoding: result.errorOutput.suffix(6000), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+            throw NashiError.failed(diagnostic.isEmpty ? "\(executable.lastPathComponent) exited with code \(code)." : diagnostic)
+        }
+        return result
     }
-    private final class Capture: @unchecked Sendable { var output=Data(); var errors=Data() }
+
+    /// Time a process group gets to exit after SIGTERM before SIGKILL.
+    static let stopGrace: TimeInterval = 2
+
+    private static func spawn(_ executable: URL, _ arguments: [String], directory: URL?, environment: [String: String], output: Pipe, errors: Pipe) throws -> pid_t {
+        var actions: posix_spawn_file_actions_t?, attributes: posix_spawnattr_t?
+        posix_spawn_file_actions_init(&actions); posix_spawnattr_init(&attributes)
+        defer { posix_spawn_file_actions_destroy(&actions); posix_spawnattr_destroy(&attributes) }
+        posix_spawn_file_actions_adddup2(&actions, output.fileHandleForWriting.fileDescriptor, STDOUT_FILENO)
+        posix_spawn_file_actions_adddup2(&actions, errors.fileHandleForWriting.fileDescriptor, STDERR_FILENO)
+        posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0)
+        if let directory { posix_spawn_file_actions_addchdir_np(&actions, directory.path) }
+        // Only the three standard streams reach the child: an inherited pipe of a
+        // concurrent run would otherwise stay open (no EOF) until this tool ends.
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
+        posix_spawnattr_setpgroup(&attributes, 0)
+        let argv = ([executable.path] + arguments).map { strdup($0) } + [nil]
+        let envp = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
+        defer { for pointer in argv { free(pointer) }; for pointer in envp { free(pointer) } }
+        var pid: pid_t = 0
+        let status = argv.withUnsafeBufferPointer { args in envp.withUnsafeBufferPointer { env in
+            posix_spawn(&pid, executable.path, &actions, &attributes, UnsafeMutablePointer(mutating: args.baseAddress!), UnsafeMutablePointer(mutating: env.baseAddress!))
+        } }
+        try? output.fileHandleForWriting.close(); try? errors.fileHandleForWriting.close()
+        guard status == 0 else {
+            try? output.fileHandleForReading.close(); try? errors.fileHandleForReading.close()
+            throw NashiError.failed("\(executable.lastPathComponent) could not start: \(String(cString: strerror(status))).")
+        }
+        return pid
+    }
+
+    private final class Capture: @unchecked Sendable {
+        private let lock = NSLock(), keepsTail: Bool
+        private var output = Data(), errors = Data()
+        init(keepsTail: Bool) { self.keepsTail = keepsTail }
+        func appendOutput(_ data: Data) {
+            lock.lock(); defer { lock.unlock() }
+            output.append(data)
+            if keepsTail && output.count > 2_000_000 { output.removeFirst(output.count - 2_000_000) }
+        }
+        func appendErrors(_ data: Data) { lock.lock(); errors.append(data); lock.unlock() }
+        var result: ProcessResult { lock.lock(); defer { lock.unlock() }; return ProcessResult(output: output, errorOutput: errors) }
+    }
 
     /// Stops every child still running, for app termination: a cancelled token is
-    /// only observed by the polling thread, which does not outlive the app.
+    /// only observed by the polling thread, which does not outlive the app. Each
+    /// process group gets SIGTERM, then SIGKILL; the wait is bounded.
     public static func terminateAll() {
-        for process in running.snapshot() where process.isRunning { process.terminate() }
+        let groups = running.stopAll()
+        guard !groups.isEmpty else { return }
+        for pid in groups { kill(-pid, SIGTERM) }
+        let deadline = Date().addingTimeInterval(stopGrace)
+        while Date() < deadline, running.contains(any: groups) { Thread.sleep(forTimeInterval: 0.02) }
+        for pid in groups where running.contains(any: [pid]) { kill(-pid, SIGKILL) }
     }
     private static let running = Running()
     private final class Running: @unchecked Sendable {
         private let lock = NSLock()
-        private var processes: [ObjectIdentifier: Process] = [:]
-        func insert(_ process: Process) { lock.lock(); processes[ObjectIdentifier(process)] = process; lock.unlock() }
-        func remove(_ process: Process) { lock.lock(); processes[ObjectIdentifier(process)] = nil; lock.unlock() }
-        func snapshot() -> [Process] { lock.lock(); defer { lock.unlock() }; return Array(processes.values) }
+        private var groups: [pid_t: Bool] = [:]
+        func insert(_ pid: pid_t) { lock.lock(); groups[pid] = false; lock.unlock() }
+        func remove(_ pid: pid_t) { lock.lock(); groups[pid] = nil; lock.unlock() }
+        func isStopping(_ pid: pid_t) -> Bool { lock.lock(); defer { lock.unlock() }; return groups[pid] == true }
+        func contains(any pids: [pid_t]) -> Bool { lock.lock(); defer { lock.unlock() }; return pids.contains { groups[$0] != nil } }
+        func stopAll() -> [pid_t] {
+            lock.lock(); defer { lock.unlock() }
+            for pid in groups.keys { groups[pid] = true }
+            return Array(groups.keys)
+        }
     }
 }
 

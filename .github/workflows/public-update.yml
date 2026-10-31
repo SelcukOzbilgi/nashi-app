@@ -7,6 +7,8 @@ permissions:
   contents: read
 jobs:
   update:
+    # Fork: bu doğrulama upstream'in yayınlarını indirir; yalnız upstream'de çalışır.
+    if: github.repository == 'orkunisitmak/nashi-app'
     runs-on: windows-2025
     timeout-minutes: 25
     steps:

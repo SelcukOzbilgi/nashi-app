@@ -35,6 +35,11 @@ try
         catch (InvalidDataException) { checks++; }
     }
     Check(SafePaths.ArchiveEntry(root, "folder/file.txt") == Path.Combine(root, "folder", "file.txt"), "Valid nested path failed");
+    // LibreOffice loads linked HTML resources while importing: http, UNC (\\host) and file: references must not survive.
+    foreach (var hostile in new[] { @"<img src=""http://203.0.113.9/p.png"">", @"<img src='\\203.0.113.9\s\a.png'>", @"<img src=\\203.0.113.9\s\a.png>", @"<img src=file:///C:/203.0.113.9/win.ini>", @"<img srcset=""http://203.0.113.9/a.png 2x"">", @"<a href=""\\203.0.113.9\s"">x</a>", @"<a href=//203.0.113.9/s>x</a>", @"<embed data=""FILE:///C:/203.0.113.9"">", @"<p style=""background:url(http://203.0.113.9/x)"">x</p>", @"<style>@import ""http://203.0.113.9/a.css"";</style>", @"<style>@import""http://203.0.113.9/b.css"";</style>", @"<object data=""&#92;&#92;203.0.113.9\x"">", @"<applet codebase=""http://203.0.113.9/"">", @"<img lowsrc=""http://203.0.113.9/l.png"">", @"<img sr src=x c=\\203.0.113.9\s>", @"<img/src=""http://203.0.113.9/s.png"">", @"<a/href=\\203.0.113.9\s>x</a>", @"<img alt=""x""src=""http://203.0.113.9/q.png"">", @"<a title='t'href='\\203.0.113.9\s'>x</a>" })
+        Check(!OfficeDocuments.SanitizedHtml(hostile).Contains("203.0.113.9"), "Linked HTML resource survived sanitizing: " + hostile);
+    Check(!System.Text.RegularExpressions.Regex.IsMatch(OfficeDocuments.SanitizedHtml(@"<img sr src=""x""c=""http://203.0.113.9/r.png"">"),@"src\s*=",System.Text.RegularExpressions.RegexOptions.IgnoreCase), "Removing an attribute assembled a new resource attribute");
+    Check(OfficeDocuments.SanitizedHtml(@"<p>Text</p><img src=""data:image/png;base64,AAAA"">") == @"<p>Text</p><img src=""data:image/png;base64,AAAA"">", "Sanitizing removed embedded data or text");
     File.WriteAllText(Path.Combine(root, "Output.txt"), "keep");
     using (var transaction = new ExportTransaction(root))
     {
@@ -87,6 +92,11 @@ try
     var fake=Path.Combine(root,"fake.zip");File.WriteAllText(fake,"untrusted");
     var update=new WindowsUpdate("99.0.0.0","https://github.com/orkunisitmak/nashi-app/releases/download/test/Nashi.zip",new FileInfo(fake).Length,Convert.ToBase64String(new byte[64]));
     try{await PublicUpdates.VerifyAsync(fake,update);throw new Exception("Unsigned update accepted");}catch(InvalidDataException){checks++;}
+    var fakePayload=Path.Combine(root,"fake-payload");Directory.CreateDirectory(fakePayload);
+    try{await PublicUpdates.VerifyAndExtractAsync(fake,update,fakePayload);throw new Exception("Unsigned update extracted");}catch(InvalidDataException){checks++;}
+    Check(!Directory.EnumerateFileSystemEntries(fakePayload).Any(),"An unsigned update wrote files before verification");
+    using(new FileStream(fake,FileMode.Open,FileAccess.Read,FileShare.None))
+    {try{using var replace=new FileStream(fake,FileMode.Open,FileAccess.Write,FileShare.ReadWrite);throw new Exception("A locked update archive could be replaced");}catch(IOException){checks++;}}
     foreach(var url in new[]{"https://evil.example/replace.zip","file:///temp/file.zip","https://github.com/another/repo/releases/download/test/file.zip"})
     {try{PublicUpdates.Validate(update with{Url=url});throw new Exception("Untrusted update URL accepted");}catch(InvalidDataException){checks++;}}
     Console.WriteLine(JsonSerializer.Serialize(new { passed = checks, scope = "Cross-platform Windows engine safety foundation; no Windows GUI claimed" }));
@@ -169,9 +179,8 @@ if(Environment.GetEnvironmentVariable("NASHI_VERIFY_FFMPEG") is {} encoder && En
 if(Environment.GetEnvironmentVariable("NASHI_VERIFY_UPDATE_MANIFEST") is {} manifestPath&&Environment.GetEnvironmentVariable("NASHI_VERIFY_UPDATE_ARCHIVE") is {} archivePath)
 {
     var update=JsonSerializer.Deserialize<WindowsUpdate>(await File.ReadAllTextAsync(manifestPath),new JsonSerializerOptions{PropertyNameCaseInsensitive=true})??throw new Exception("Missing update manifest.");
-    await PublicUpdates.VerifyAsync(archivePath,update);
     var extracted=Path.Combine(Path.GetTempPath(),"Nashi-Update-Verify-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(extracted);
-    try{PublicUpdates.ExtractVerified(archivePath,extracted);Console.WriteLine("PASS signed public Windows archive and safe extraction");}finally{Directory.Delete(extracted,true);}
+    try{await PublicUpdates.VerifyAndExtractAsync(archivePath,update,extracted);Console.WriteLine("PASS signed public Windows archive and safe extraction");}finally{Directory.Delete(extracted,true);}
 }
 
 sealed class InlineProgress(Action<OperationProgress> report):IProgress<OperationProgress>
