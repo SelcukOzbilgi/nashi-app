@@ -3,10 +3,10 @@
 <plist version="1.0">
 <dict>
 	<key>FeedURL</key>
-	<string>https://github.com/orkunisitmak/nashi-app/releases/latest/download/appcast.xml</string>
+	<string>https://github.com/selcukozbilgi/nashi-app/releases/latest/download/appcast.xml</string>
 	<key>PublicEDKey</key>
 	<string>VPJpPpgXKda4c3ZOvP4zH8koa3ht1jm6lJWNBr+2saU=</string>
 	<key>PublicRepository</key>
-	<string>orkunisitmak/nashi-app</string>
+	<string>selcukozbilgi/nashi-app</string>
 </dict>
 </plist>
