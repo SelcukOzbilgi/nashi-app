@@ -27,19 +27,35 @@ public static class PublicUpdates
         if(!Version.TryParse(update.Version,out _)||!Uri.TryCreate(update.Url,UriKind.Absolute,out var uri)||uri.Scheme!="https"||uri.Host!="github.com"||!uri.AbsolutePath.StartsWith("/"+Repository+"/releases/download/",StringComparison.Ordinal)||!string.IsNullOrEmpty(uri.UserInfo)||uri.Query.Length>0||update.Length<1||update.Length>1024L*1024*1024)throw new InvalidDataException("Invalid public update location or size.");
         try{if(Convert.FromBase64String(update.EdSignature).Length!=64)throw new InvalidDataException("Invalid update signature length.");}catch(FormatException e){throw new InvalidDataException("Invalid update signature.",e);}
     }
+    /// Verifies the signature and extracts through one handle opened with FileShare.None,
+    /// so the archive cannot be replaced between the check and the extraction.
+    public static async Task VerifyAndExtractAsync(string archive,WindowsUpdate update,string destination,CancellationToken token=default)
+    {
+        await using var source=new FileStream(archive,FileMode.Open,FileAccess.Read,FileShare.None,81920,FileOptions.Asynchronous);
+        await VerifyAsync(source,update,token);
+        source.Position=0;ExtractVerified(source,destination,token);
+    }
     public static async Task VerifyAsync(string archive,WindowsUpdate update,CancellationToken token=default)
     {
-        Validate(update);if(new FileInfo(archive).Length!=update.Length)throw new InvalidDataException("Update size mismatch.");
+        await using var source=File.OpenRead(archive);await VerifyAsync(source,update,token);
+    }
+    public static async Task VerifyAsync(Stream source,WindowsUpdate update,CancellationToken token=default)
+    {
+        Validate(update);if(source.Length!=update.Length)throw new InvalidDataException("Update size mismatch.");
         var verifier=new Ed25519Signer();verifier.Init(false,new Ed25519PublicKeyParameters(Convert.FromBase64String(PublicKey),0));
-        await using var source=File.OpenRead(archive);var buffer=new byte[81920];int count;
+        var buffer=new byte[81920];int count;
         while((count=await source.ReadAsync(buffer,token))>0)verifier.BlockUpdate(buffer,0,count);
         if(!verifier.VerifySignature(Convert.FromBase64String(update.EdSignature)))throw new InvalidDataException("The update signature is invalid. Your existing app was kept.");
     }
     public static void ExtractVerified(string archive,string destination,CancellationToken token=default)
     {
+        using var source=File.OpenRead(archive);ExtractVerified(source,destination,token);
+    }
+    public static void ExtractVerified(Stream archive,string destination,CancellationToken token=default)
+    {
         // Caller must verify the archive signature before calling. This extractor
         // still rejects traversal, links, aliases and excessive expansion.
-        using var zip=ZipFile.OpenRead(archive);long total=0;var names=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        using var zip=new ZipArchive(archive,ZipArchiveMode.Read,leaveOpen:true);long total=0;var names=new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if(zip.Entries.Count>10000)throw new InvalidDataException("Too many update files.");
         foreach(var entry in zip.Entries)
         {

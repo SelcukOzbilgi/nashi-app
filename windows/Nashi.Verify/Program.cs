@@ -91,6 +91,11 @@ try
     var fake=Path.Combine(root,"fake.zip");File.WriteAllText(fake,"untrusted");
     var update=new WindowsUpdate("99.0.0.0","https://github.com/orkunisitmak/nashi-app/releases/download/test/Nashi.zip",new FileInfo(fake).Length,Convert.ToBase64String(new byte[64]));
     try{await PublicUpdates.VerifyAsync(fake,update);throw new Exception("Unsigned update accepted");}catch(InvalidDataException){checks++;}
+    var fakePayload=Path.Combine(root,"fake-payload");Directory.CreateDirectory(fakePayload);
+    try{await PublicUpdates.VerifyAndExtractAsync(fake,update,fakePayload);throw new Exception("Unsigned update extracted");}catch(InvalidDataException){checks++;}
+    Check(!Directory.EnumerateFileSystemEntries(fakePayload).Any(),"An unsigned update wrote files before verification");
+    using(new FileStream(fake,FileMode.Open,FileAccess.Read,FileShare.None))
+    {try{using var replace=new FileStream(fake,FileMode.Open,FileAccess.Write,FileShare.ReadWrite);throw new Exception("A locked update archive could be replaced");}catch(IOException){checks++;}}
     foreach(var url in new[]{"https://evil.example/replace.zip","file:///temp/file.zip","https://github.com/another/repo/releases/download/test/file.zip"})
     {try{PublicUpdates.Validate(update with{Url=url});throw new Exception("Untrusted update URL accepted");}catch(InvalidDataException){checks++;}}
     Console.WriteLine(JsonSerializer.Serialize(new { passed = checks, scope = "Cross-platform Windows engine safety foundation; no Windows GUI claimed" }));
@@ -173,9 +178,8 @@ if(Environment.GetEnvironmentVariable("NASHI_VERIFY_FFMPEG") is {} encoder && En
 if(Environment.GetEnvironmentVariable("NASHI_VERIFY_UPDATE_MANIFEST") is {} manifestPath&&Environment.GetEnvironmentVariable("NASHI_VERIFY_UPDATE_ARCHIVE") is {} archivePath)
 {
     var update=JsonSerializer.Deserialize<WindowsUpdate>(await File.ReadAllTextAsync(manifestPath),new JsonSerializerOptions{PropertyNameCaseInsensitive=true})??throw new Exception("Missing update manifest.");
-    await PublicUpdates.VerifyAsync(archivePath,update);
     var extracted=Path.Combine(Path.GetTempPath(),"Nashi-Update-Verify-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(extracted);
-    try{PublicUpdates.ExtractVerified(archivePath,extracted);Console.WriteLine("PASS signed public Windows archive and safe extraction");}finally{Directory.Delete(extracted,true);}
+    try{await PublicUpdates.VerifyAndExtractAsync(archivePath,update,extracted);Console.WriteLine("PASS signed public Windows archive and safe extraction");}finally{Directory.Delete(extracted,true);}
 }
 
 sealed class InlineProgress(Action<OperationProgress> report):IProgress<OperationProgress>
