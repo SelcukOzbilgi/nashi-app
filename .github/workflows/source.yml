@@ -25,7 +25,7 @@ jobs:
         run: python3 scripts/scan-secrets.py
   mac-source:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
@@ -44,13 +44,16 @@ jobs:
           path: build/native-ui
           retention-days: 7
           if-no-files-found: warn
-      - name: Archive link boundary and extraction regressions
-        run: swift test --filter 'ArchiveLinkBoundaryTests|ArchiveResourceLimitsTests|DocumentEngineTests/testArchive|DocumentEngineTests/testZIPTARGZIPRoundTripsNestedFilesAndUnicodeWithoutOverwritingOriginals|DocumentEngineTests/testStoredRARAndOrdinaryGZIPAreReadable|DocumentEngineTests/testCancellationProducesNoPublishedDocumentOrExtractedFolder'
-      - name: Update trust, web photo and window placement and setup regressions
-        run: swift test --filter 'NashiUpdatesTests|WebMediaDragPayloadTests|InstagramPhotosTests|YouTubeThumbnailTests|WindowPlacementTests|AppLocalizationTests|ToolSetupTests'
-      - name: HTML to PDF layout, offline isolation and cancellation
-        run: swift test --filter HTMLToPDFTests
-      - name: Install FFmpeg for redaction regressions
-        run: brew install ffmpeg
-      - name: Redaction coverage and image opacity regressions
-        run: swift test --filter 'SolidRedactionCoverageTests|ImageRedactionBoundsRegressionTests|ImageColorOpacityRegressionTests|MediaEngineTests/testVideoRedactionStylesAndTemporalBounds'
+      # Fork: the whole suite runs, not a filtered subset. Conversion tests need the
+      # same external tools the app installs (LibreOffice, an FFmpeg with WebP and
+      # Vorbis encoders, Deno) plus the pinned ExifTool checkout.
+      - name: Install conversion tools for the full test suite
+        run: |
+          brew install ffmpeg-full deno
+          brew install --cask libreoffice
+          zsh scripts/setup-exiftool.sh
+          prefix="$(brew --prefix ffmpeg-full)/bin"
+          echo "NASHI_FFMPEG=$prefix/ffmpeg" >> "$GITHUB_ENV"
+          echo "NASHI_FFPROBE=$prefix/ffprobe" >> "$GITHUB_ENV"
+      - name: Full Swift test suite
+        run: swift test
