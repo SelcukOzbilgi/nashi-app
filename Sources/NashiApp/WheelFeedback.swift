@@ -105,8 +105,9 @@ import Foundation
         } else {
             started = false
         }
-        performHaptic()
-        return Attempt(outcome: .requested, soundStarted: started, hapticRequested: true)
+        let haptic = hapticsEnabled
+        if haptic { performHaptic() }
+        return Attempt(outcome: .requested, soundStarted: started, hapticRequested: haptic)
     }
 
     /// A Settings test uses the same preference and rate limit as the wheel.
@@ -125,6 +126,10 @@ import Foundation
         if defaults.object(forKey: "sound") != nil { return defaults.bool(forKey: "sound") }
         return true
     }
+
+    /// Fork: the Force Touch trackpad tick is opt-in and independent of the sound.
+    static let hapticsKey = "trackpadHapticsEnabled"
+    private var hapticsEnabled: Bool { defaults.bool(forKey: Self.hapticsKey) }
 
     /// The supplied WAV is bundled verbatim, including its short natural decay.
     private static var soundURL: URL? {

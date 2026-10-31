@@ -17,6 +17,7 @@ struct SettingsView:View {
     @AppStorage("wheelScale") private var wheelScale=1.0
     @AppStorage("conversionFanTheme") private var fanTheme="glass"
     @AppStorage("soundsAndHapticsEnabled") private var feedback=true
+    @AppStorage(WheelFeedback.hapticsKey) private var trackpadHaptics=false
     @AppStorage("floatWheelBehavior") private var floatBehavior="createNew"
     @AppStorage("fileActionsTerminalApplication") private var terminalApplication="com.apple.Terminal"
     @State private var shortcutsRevision=0
@@ -96,10 +97,11 @@ struct SettingsView:View {
                     if launchUnavailable { Text("Launch at login is unavailable for this copy.").font(.caption).foregroundStyle(.secondary) }
                     if let launchError { Text(launchError).font(.caption).foregroundStyle(.secondary) }
                     HStack {
-                        Toggle("Sound and haptic feedback",isOn:$feedback)
+                        Toggle("Sound feedback",isOn:$feedback)
                         Button("Try feedback") { _ = WheelFeedback.shared.testPreview() }
                             .disabled(!feedback)
                     }
+                    Toggle("Trackpad haptics",isOn:$trackpadHaptics).disabled(!feedback)
                     Text("Sound follows your Mac’s volume. Haptics need a compatible Force Touch trackpad.")
                         .font(.caption).foregroundStyle(.secondary).frame(maxWidth:.infinity,alignment:.leading)
                     Toggle("Subtle animations",isOn:Binding(get:{!reduceAnimations},set:{reduceAnimations = !$0}))

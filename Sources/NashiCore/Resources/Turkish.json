@@ -28,6 +28,8 @@
   "Allow Nashi in macOS Login Items.": "macOS Giriş Öğeleri bölümünden Nashi'ye izin ver.",
   "Open Login Items": "Giriş Öğelerini Aç",
   "Sound and haptic feedback": "Ses ve dokunsal geri bildirim",
+  "Sound feedback": "Ses geri bildirimi",
+  "Trackpad haptics": "Trackpad titreşimi",
   "Sound feedback": "Sesli geri bildirim",
   "Try feedback": "Geri bildirimi dene",
   "Sound follows your Mac’s volume. Haptics need a compatible Force Touch trackpad.": "Ses, Mac'inin ses düzeyini kullanır. Titreşim için uyumlu bir Force Touch trackpad gerekir.",
